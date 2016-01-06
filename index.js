@@ -302,7 +302,7 @@ Pylon.prototype.$clientFn.processMessage = function (client, message) {
 			this.$actions.forEach((actionObj) => {
 				// todo: allow regexes
 				if (msgObj.meta.patt === actionObj.pattern) {
-					actionObj.action(msgObj.body, function respond (data) {
+					actionObj.action.call(this, msgObj.body, function respond (data) {
 
 						msgObj.meta.type = MESSAGE_TYPE.REPLY
 						msgObj.meta.clientId = client.id
@@ -315,7 +315,7 @@ Pylon.prototype.$clientFn.processMessage = function (client, message) {
 			break;
 
 		case MESSAGE_TYPE.REPLY:
-			this.$callbacks = this.$callbacks.map((cbObj) => {
+			this.$callbacks = this.$callbacks.filter((cbObj) => {
 				// todo: allow regexes
 				if (cbObj.pattern != msgObj.meta.patt || cbObj.msgId != msgObj.meta.id) {
 					return true
@@ -349,7 +349,7 @@ Pylon.prototype.$clientFn.notify = function (msgObj) {
 // --------------------------------------------
 // internal socket methods
 // --------------------------------------------
-var msgLimit = 30, msgCount = 0;
+var msgLimit = 0, msgCount = 0;
 Pylon.prototype.$sockFn.write = function (sock, msgObj) {
 	if (msgLimit > 0 && msgLimit < msgCount) throw new Error('bandwith reached')
 	msgCount++
