@@ -120,6 +120,13 @@ Pylon.prototype.$notify = function (msgObj) {
 
 	if (this.$server != null) $serverFn.broadcast.call(this, msgObj)
 	$clientFn.notify.call(this, msgObj)
+
+	if (this.$broadcastQueue.length > 0) {
+		process.nextTick(() => {
+			let msgObj = this.$broadcastQueue.shift()
+			this.$notify(msgObj)
+		})
+	}
 	return this
 }
 
@@ -301,16 +308,17 @@ Pylon.prototype.$clientFn.processMessage = function (client, message) {
 		case MESSAGE_TYPE.MESSG:
 			this.$actions.forEach((actionObj) => {
 				// todo: allow regexes
-				if (msgObj.meta.patt === actionObj.pattern) {
-					actionObj.action.call(this, msgObj.body, function respond (data) {
+				if (msgObj.meta.patt !== actionObj.pattern) return
 
-						msgObj.meta.type = MESSAGE_TYPE.REPLY
-						msgObj.meta.clientId = client.id
-						msgObj.body  = data
+				actionObj.action.call(this, msgObj.body, function respond (data) {
+					msgObj.meta.type = MESSAGE_TYPE.REPLY
+					msgObj.meta.clientId = client.id
+					msgObj.body  = data
+					delete msgObj.meta.srvId
 
-						$sockFn.write(client.socket, msgObj)
-					})
-				}
+					$clientFn.log(client, LOG_TYPE.NOT + ' ' + JSON.stringify(msgObj) + ' N> ' + client.srvId)
+					$sockFn.write(client.socket, msgObj)
+				})
 			})
 			break;
 
@@ -343,7 +351,6 @@ Pylon.prototype.$clientFn.notify = function (msgObj) {
 		$sockFn.write(client.socket, msgObj)
 	})
 }
-
 
 
 // --------------------------------------------

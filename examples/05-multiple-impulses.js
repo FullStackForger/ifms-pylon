@@ -21,7 +21,7 @@ var pGate = new Pylon('p-gate')
 
 		function update(msg) {
 			responses.push(msg.data)
-			console.log((new Date()).toISOString() + ' GATE: updating responses: ', responses)
+			console.log((new Date()).toISOString() + ' GATE: responses updated: ', responses)
 			if (responses.length == 2) {
 				respond({ responses: responses })
 			}
@@ -42,6 +42,15 @@ var pApi2 = new Pylon('p-api-2')
 		respond({ data: 'bbbBBBbbb' })
 	})
 
-pNexus.notify('some/data/request', { api: 'a&b' }, (data) => {
+
+pNexus.notify('some/data/request', { api: 'a&b1' }, (data) => {
 	console.log((new Date()).toISOString() + ' NEXUS: data received: ' + JSON.stringify(data))
+})
+
+pApi1.notify('some/data/request', { api: 'a&b2' }, (data) => {
+	console.log((new Date()).toISOString() + ' API_1: data received: ' + JSON.stringify(data))
+})
+
+pApi2.notify('some/data/request', { api: 'a&b3' }, (data) => {
+	console.log((new Date()).toISOString() + ' API_2: data received: ' + JSON.stringify(data))
 })
