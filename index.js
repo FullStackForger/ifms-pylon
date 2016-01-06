@@ -25,8 +25,13 @@ LOG_TYPE.REC = 'REC' // message
 LOG_TYPE.NOT = 'NOT' // notification
 LOG_TYPE.BRD = 'BRD' // broadcast
 
-function Pylon (name) {
-	this.name = name || 'pylon-' + shortId.generate().substr(0, 4)
+function Pylon (opts) {
+
+	if (typeof(opts) == 'string') opts = { name : opts }
+	this.opts = opts || {}
+	opts.name = opts.name || 'pylon-' + shortId.generate().substr(0, 4)
+	opts.debug = opts.debug || false
+
 	this.$server = null
 	this.$clients = [] // {obj} id, socket, name
 	this.$actions = []
@@ -48,7 +53,7 @@ Pylon.prototype.create = function (opts) {
 	let $server = this.$server = {}
 
 	opts = opts || {}
-	opts.name = opts.name || this.name
+	opts.name = opts.name || this.opts.name
 	opts.port = opts.port || defaults.port
 	opts.host = opts.host || defaults.host
 
@@ -75,7 +80,7 @@ Pylon.prototype.connect = function (opts) {
 	client.opts = opts
 	client.opts.port = opts.port || defaults.port
 	client.opts.host = opts.host || defaults.host
-	client.name = opts.name || this.name
+	client.name = opts.name || this.opts.name
 
 	client.socket = net.Socket()
 	client.socket.connect(opts, () => { return $clientFn.onConnect.call(pylon, client) })
@@ -121,12 +126,12 @@ Pylon.prototype.$notify = function (msgObj) {
 	if (this.$server != null) $serverFn.broadcast.call(this, msgObj)
 	$clientFn.notify.call(this, msgObj)
 
-	if (this.$broadcastQueue.length > 0) {
-		process.nextTick(() => {
+	process.nextTick(() => {
+		if (this.$broadcastQueue.length > 0) {
 			let msgObj = this.$broadcastQueue.shift()
 			this.$notify(msgObj)
-		})
-	}
+		}
+	})
 	return this
 }
 
@@ -166,6 +171,7 @@ Pylon.prototype.isReady = function () {
 
 
 Pylon.prototype.$serverFn.log = function (info) {
+	if (!this.opts.debug) return
 	console.log((new Date()).toISOString() + '   ' + this.$server.name + ' (server:' + this.$server.id + ')\t ' + info)
 }
 
@@ -258,6 +264,7 @@ Pylon.prototype.$serverFn.broadcast = function (msgObj) {
 // --------------------------------------------
 
 Pylon.prototype.$clientFn.log = function (client, info) {
+	if (!this.opts.debug) return
 	console.log((new Date()).toISOString() + '   ' + client.name + ' (client:' + client.id + ')\t ' + info)
 }
 
@@ -270,7 +277,7 @@ Pylon.prototype.$clientFn.activate = function (client) {
 }
 
 Pylon.prototype.$clientFn.onConnect = function (client) {
-	$clientFn.log(client, LOG_TYPE.CON + ' connecting to: ' + client.opts.host + ':' + client.opts.port)
+	$clientFn.log.call(this, client, LOG_TYPE.CON + ' connecting to: ' + client.opts.host + ':' + client.opts.port)
 }
 
 Pylon.prototype.$clientFn.onData = function (client, message) {
@@ -286,8 +293,9 @@ Pylon.prototype.$clientFn.onData = function (client, message) {
 
 Pylon.prototype.$clientFn.processMessage = function (client, message) {
 	let msgObj = this.parse(message)
+	let pylon = this
 
-	$clientFn.log(client, LOG_TYPE.REC + ' ' + message)
+	$clientFn.log.call(this, client, LOG_TYPE.REC + ' ' + message)
 	switch(msgObj.meta.type) {
 
 		case MESSAGE_TYPE.IDENT:
@@ -316,7 +324,7 @@ Pylon.prototype.$clientFn.processMessage = function (client, message) {
 					msgObj.body  = data
 					delete msgObj.meta.srvId
 
-					$clientFn.log(client, LOG_TYPE.NOT + ' ' + JSON.stringify(msgObj) + ' N> ' + client.srvId)
+					$clientFn.log.call(pylon, client, LOG_TYPE.NOT + ' ' + JSON.stringify(msgObj) + ' N> ' + client.srvId)
 					$sockFn.write(client.socket, msgObj)
 				})
 			})
@@ -337,7 +345,7 @@ Pylon.prototype.$clientFn.processMessage = function (client, message) {
 }
 
 Pylon.prototype.$clientFn.onClose = (client) => {
-	$clientFn.log(client, 'connection closed')
+	$clientFn.log.call(this, client, 'connection closed')
 }
 
 Pylon.prototype.$clientFn.notify = function (msgObj) {
@@ -347,7 +355,7 @@ Pylon.prototype.$clientFn.notify = function (msgObj) {
 	this.$clients.forEach((client) => {
 		if (srvId != null && (client.id == srvId || msgObj.meta.srvId == srvId)) return
 		msgObj.meta.clientId = client.id
-		$clientFn.log(client, LOG_TYPE.NOT + ' ' + JSON.stringify(msgObj) + ' N> ' + client.srvId)
+		$clientFn.log.call(this, client, LOG_TYPE.NOT + ' ' + JSON.stringify(msgObj) + ' N> ' + client.srvId)
 		$sockFn.write(client.socket, msgObj)
 	})
 }
