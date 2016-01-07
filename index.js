@@ -15,10 +15,10 @@ const
 
 module.exports = Pylon
 
-MESSAGE_TYPE.IDENT = "IDNT"
-MESSAGE_TYPE.INTRO = "INTR"
-MESSAGE_TYPE.MESSG = "MESG"
-MESSAGE_TYPE.REPLY = "REPL"
+MESSAGE_TYPE.IDNT = "IDNT"
+MESSAGE_TYPE.INTR = "INTR"
+MESSAGE_TYPE.MSSG = "MSSG"
+MESSAGE_TYPE.REPL = "REPL"
 
 LOG_TYPE.STR = 'STR' // start
 LOG_TYPE.CON = 'CON' // connection
@@ -200,7 +200,7 @@ Pylon.prototype.$serverFn.onClientConnect = function (sock) {
 
 	let msgObj = {
 		meta: {
-			type: MESSAGE_TYPE.IDENT
+			type: MESSAGE_TYPE.IDNT
 		},
 		body: {
 			id: client.id,
@@ -228,16 +228,16 @@ Pylon.prototype.$serverFn.processMessage = function (client, message) {
 
 	let msgObj = this.parse(message)
 	switch(msgObj.meta.type) {
-		case MESSAGE_TYPE.INTRO:
+		case MESSAGE_TYPE.INTR:
 			client.name = msgObj.body.name
 			$clientFn.activate.call(this, client);
 			break;
 
-		case MESSAGE_TYPE.MESSG:
+		case MESSAGE_TYPE.MSSG:
 			this.$notify.call(this, msgObj)
 			break;
 
-		case MESSAGE_TYPE.REPLY:
+		case MESSAGE_TYPE.REPL:
 			this.$notify.call(this, msgObj)
 			break;
 	}
@@ -255,7 +255,7 @@ Pylon.prototype.$serverFn.onClose = function (client, data) {
 Pylon.prototype.$serverFn.broadcast = function (msgObj) {
 	let srvId = this.$server.id
 
-	msgObj.meta.type = msgObj.meta.type === MESSAGE_TYPE.REPLY ? msgObj.meta.type : MESSAGE_TYPE.MESSG
+	msgObj.meta.type = msgObj.meta.type === MESSAGE_TYPE.REPL ? msgObj.meta.type : MESSAGE_TYPE.MSSG
 	msgObj.meta.srvId = srvId
 
 	this.$server.clients.forEach((client) => {
@@ -303,13 +303,13 @@ Pylon.prototype.$clientFn.processMessage = function (client, message) {
 	$clientFn.log.call(this, client, LOG_TYPE.REC + ' ' + message)
 	switch(msgObj.meta.type) {
 
-		case MESSAGE_TYPE.IDENT:
+		case MESSAGE_TYPE.IDNT:
 			client.id = msgObj.body.id
 			client.srvId = msgObj.body.srvId
 			this.$clientFn.activate.call(this, client)
 			$sockFn.write.call(this, client.socket, {
 				meta: {
-					type: MESSAGE_TYPE.INTRO
+					type: MESSAGE_TYPE.INTR
 				},
 				body: {
 					name: client.name,
@@ -318,13 +318,13 @@ Pylon.prototype.$clientFn.processMessage = function (client, message) {
 			})
 			break;
 
-		case MESSAGE_TYPE.MESSG:
+		case MESSAGE_TYPE.MSSG:
 			this.$actions.forEach((actionObj) => {
 				// todo: allow regexes
 				if (msgObj.meta.patt !== actionObj.pattern) return
 
 				actionObj.action.call(this, msgObj.body, function respond (data) {
-					msgObj.meta.type = MESSAGE_TYPE.REPLY
+					msgObj.meta.type = MESSAGE_TYPE.REPL
 					msgObj.meta.clientId = client.id
 					msgObj.body  = data
 					delete msgObj.meta.srvId
@@ -335,7 +335,7 @@ Pylon.prototype.$clientFn.processMessage = function (client, message) {
 			})
 			break;
 
-		case MESSAGE_TYPE.REPLY:
+		case MESSAGE_TYPE.REPL:
 			this.$callbacks = this.$callbacks.filter((cbObj) => {
 				// todo: allow regexes
 				if (cbObj.pattern != msgObj.meta.patt || cbObj.msgId != msgObj.meta.id) {
@@ -356,7 +356,7 @@ Pylon.prototype.$clientFn.onClose = (client) => {
 Pylon.prototype.$clientFn.notify = function (msgObj) {
 	let srvId = this.$server ? this.$server.id : null
 
-	msgObj.meta.type = msgObj.meta.type === MESSAGE_TYPE.REPLY ? msgObj.meta.type : MESSAGE_TYPE.MESSG
+	msgObj.meta.type = msgObj.meta.type === MESSAGE_TYPE.REPL ? msgObj.meta.type : MESSAGE_TYPE.MSSG
 	this.$clients.forEach((client) => {
 		if (srvId != null && (client.id == srvId || msgObj.meta.srvId == srvId)) return
 		msgObj.meta.clientId = client.id
