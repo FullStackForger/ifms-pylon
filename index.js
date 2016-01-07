@@ -1,7 +1,8 @@
 'use strict'
 var
 	net = require('net'),
-	shortId = require('shortid')
+	shortId = require('shortid'),
+	EventEmitter = require( "events" ).EventEmitter
 
 const
 	defaults = {
@@ -27,6 +28,8 @@ LOG_TYPE.BRD = 'BRD' // broadcast
 
 function Pylon (opts) {
 
+	EventEmitter.call(this)
+
 	if (typeof(opts) == 'string') opts = { name : opts }
 	this.opts = opts || {}
 	opts.name = opts.name || 'pylon-' + shortId.generate().substr(0, 4)
@@ -38,6 +41,8 @@ function Pylon (opts) {
 	this.$callbacks = []
 	this.$broadcastQueue = []
 }
+
+Pylon.prototype = Object.create( EventEmitter.prototype )
 
 const $serverFn = Pylon.prototype.$serverFn = {}
 const $clientFn = Pylon.prototype.$clientFn = {}
@@ -204,7 +209,7 @@ Pylon.prototype.$serverFn.onClientConnect = function (sock) {
 	}
 
 	$serverFn.log.call(this, LOG_TYPE.BRD + ' ' + JSON.stringify(msgObj) + ' B> ' + client.id)
-	$sockFn.write(client.socket, msgObj)
+	$sockFn.write.call(this, client.socket, msgObj)
 }
 
 Pylon.prototype.$serverFn.onData = function (client, message) {
@@ -255,7 +260,7 @@ Pylon.prototype.$serverFn.broadcast = function (msgObj) {
 
 	this.$server.clients.forEach((client) => {
 		$serverFn.log.call(this, LOG_TYPE.BRD + ' ' + JSON.stringify(msgObj) + ' B> ' + client.id)
-		$sockFn.write(client.socket, msgObj)
+		$sockFn.write.call(this, client.socket, msgObj)
 	})
 }
 
@@ -302,7 +307,7 @@ Pylon.prototype.$clientFn.processMessage = function (client, message) {
 			client.id = msgObj.body.id
 			client.srvId = msgObj.body.srvId
 			this.$clientFn.activate.call(this, client)
-			$sockFn.write(client.socket, {
+			$sockFn.write.call(this, client.socket, {
 				meta: {
 					type: MESSAGE_TYPE.INTRO
 				},
@@ -325,7 +330,7 @@ Pylon.prototype.$clientFn.processMessage = function (client, message) {
 					delete msgObj.meta.srvId
 
 					$clientFn.log.call(pylon, client, LOG_TYPE.NOT + ' ' + JSON.stringify(msgObj) + ' N> ' + client.srvId)
-					$sockFn.write(client.socket, msgObj)
+					$sockFn.write.call(pylon, client.socket, msgObj)
 				})
 			})
 			break;
@@ -356,7 +361,7 @@ Pylon.prototype.$clientFn.notify = function (msgObj) {
 		if (srvId != null && (client.id == srvId || msgObj.meta.srvId == srvId)) return
 		msgObj.meta.clientId = client.id
 		$clientFn.log.call(this, client, LOG_TYPE.NOT + ' ' + JSON.stringify(msgObj) + ' N> ' + client.srvId)
-		$sockFn.write(client.socket, msgObj)
+		$sockFn.write.call(this, client.socket, msgObj)
 	})
 }
 
@@ -368,5 +373,7 @@ var msgLimit = 0, msgCount = 0;
 Pylon.prototype.$sockFn.write = function (sock, msgObj) {
 	if (msgLimit > 0 && msgLimit < msgCount) throw new Error('bandwith reached')
 	msgCount++
+	this.emit('pulse')
 	sock.write(JSON.stringify(msgObj) + BUFF_SEP)
+
 }

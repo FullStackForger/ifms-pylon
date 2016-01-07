@@ -8,10 +8,13 @@
 var
 	Pylon = new require('..'),
 	debug = false,
-	startTime = Date.now();
+	startTime = Date.now(),
+	pulses = 0,
+	impulses = 0
 
 var pServer = new Pylon('p-server')
 	.create()
+	.on('pulse', () => pulses++ )
 
 var pProxy = new Pylon('p-proxy')
 	.connect()
@@ -28,67 +31,69 @@ var pProxy = new Pylon('p-proxy')
 			if (debug) console.log((new Date()).toISOString() + ' GATE: responses updated: ', partials)
 			if (partials.length == 2) respond({ pulse: pulse, partials: partials })
 		}
-	})
+	}).on('pulse', () => pulses++ )
 
 var pApi1 = new Pylon('p-api-1')
 	.connect()
 	.register('pulse/action/a', (data, respond) => {
 			if (debug) console.log((new Date()).toISOString() + ' API-1: pulse/action/a, data: ', data)
 			respond({ result: 'A'})
-	})
+	}).on('pulse', () => pulses++ )
 
 var pApi2 = new Pylon('p-api-2')
 	.connect()
 	.register('pulse/action/b', (data, respond) => {
 		if (debug) console.log((new Date()).toISOString() + ' API-2: pulse/action/b, data: ', data)
 		respond({ result: 'B' })
-	})
+	}).on('pulse', () => pulses++ )
 
-function startProcessing(totalPulses) {
+function startProcessing(maxImpulses) {
 	return new Promise(resolve => {
 
-		console.log("Processing of " + totalPulses + " pulses in progress...")
-		let pulses = 0
+		pulses = 0
+		impulses = 0
 
 		let interval1  = setInterval(() => {
-			if (pulses > totalPulses) return finish()
-			pServer.notify('pulse/info', { pulse: pulses }, (data) => {
+			if (impulses > maxImpulses) return finish()
+			pServer.notify('pulse/info', { pulse: impulses }, (data) => {
 				if (debug) console.log((new Date()).toISOString() + ' NEXUS: data received: ' + JSON.stringify(data))
 			})
-			pulses ++
+			impulses ++
 		}, 0)
 
 
 		let interval2  = setInterval(() => {
-			if (pulses > totalPulses) return finish()
-			pApi1.notify('pulse/info', { pulse: pulses }, (data) => {
+			if (impulses > maxImpulses) return finish()
+			pApi1.notify('pulse/info', { pulse: impulses }, (data) => {
 				if (debug) console.log((new Date()).toISOString() + ' API_1: data received: ' + JSON.stringify(data))
 			})
-			pulses ++
+			impulses ++
 		}, 0)
 
 
 		let interval3  = setInterval(() => {
-			if (pulses > totalPulses) return finish()
-			pApi2.notify('pulse/info', { pulse: pulses }, (data) => {
+			if (impulses > maxImpulses) return finish()
+			pApi2.notify('pulse/info', { pulse: impulses }, (data) => {
 				if (debug) console.log((new Date()).toISOString() + ' API_2: data received: ' + JSON.stringify(data))
 			})
-			pulses ++
+			impulses ++
 		}, 0)
 
 		function finish() {
 			clearInterval(interval1)
 			clearInterval(interval2)
 			clearInterval(interval3)
-			console.log('Processing of ' + totalPulses + ' pulses completed in ' + (Date.now() - startTime) / 1000 + 's')
+			console.log('Processing ' + maxImpulses + ' impulses '
+				+ '(' + pulses + ' internal pulses) '
+				+ 'completed in ' + (Date.now() - startTime) / 1000 + 's')
 			resolve()
 		}
 	})
 }
 
-
-
-startProcessing(100)
+startProcessing(10)
+	.then(() => {return startProcessing(20)})
+	.then(() => {return startProcessing(50)})
 	.then(() => {return startProcessing(200)})
 	.then(() => {return startProcessing(500)})
 	.then(() => {return startProcessing(1000)})
@@ -102,5 +107,8 @@ startProcessing(100)
 	.then(() => {return startProcessing(12000)})
 	.then(() => {return startProcessing(15000)})
 	.then(() => {return startProcessing(20000)})
+	.then(() => {return startProcessing(25000)})
+	.then(() => {return startProcessing(30000)})
+	.then(() => {return startProcessing(40000)})
 	.then(() => {return startProcessing(50000)})
 
