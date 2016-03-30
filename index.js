@@ -15,10 +15,11 @@ const
 
 module.exports = Pylon
 
-MESSAGE_TYPE.IDNT = "IDNT"
-MESSAGE_TYPE.INTR = "INTR"
-MESSAGE_TYPE.MSSG = "MSSG"
-MESSAGE_TYPE.REPL = "REPL"
+MESSAGE_TYPE.IDNT = "IDNT" // identification
+MESSAGE_TYPE.INTR = "INTR" // introduction
+MESSAGE_TYPE.MSSG = "MSSG" // message
+MESSAGE_TYPE.REPL = "REPL" // reply
+MESSAGE_TYPE.APAT = "APAT" // action registration
 
 LOG_TYPE.STR = 'STR' // start
 LOG_TYPE.CON = 'CON' // connection
@@ -31,6 +32,7 @@ function Pylon (opts) {
 	EventEmitter.call(this)
 
 	if (typeof(opts) == 'string') opts = { name : opts }
+	if (opts === undefined) opts = {}
 	this.opts = opts || {}
 	opts.name = opts.name || 'pylon-' + shortId.generate().substr(0, 4)
 	opts.debug = opts.debug || false
@@ -46,7 +48,9 @@ Pylon.prototype = Object.create( EventEmitter.prototype )
 
 const $serverFn = Pylon.prototype.$serverFn = {}
 const $clientFn = Pylon.prototype.$clientFn = {}
+const $helperFn = Pylon.prototype.$helperFn = {}
 const $sockFn = Pylon.prototype.$sockFn = {}
+
 
 // --------------------------------------------
 // region: API methods
@@ -86,6 +90,7 @@ Pylon.prototype.connect = function (opts) {
 	client.opts.port = opts.port || defaults.port
 	client.opts.host = opts.host || defaults.host
 	client.name = opts.name || this.opts.name
+	client.patterns = []
 
 	client.socket = net.Socket()
 	client.socket.connect(opts, () => { return $clientFn.onConnect.call(pylon, client) })
@@ -100,7 +105,8 @@ Pylon.prototype.notify = function (pattern, data, replyCb) {
 	let msgObj = {
 		meta : {
 			id: shortId.generate(),
-			patt: pattern
+			patt: pattern,
+			type: MESSAGE_TYPE.MSSG
 		},
 		body : data
 	}
@@ -118,17 +124,18 @@ Pylon.prototype.notify = function (pattern, data, replyCb) {
 
 Pylon.prototype.$notify = function (msgObj) {
 
-	if (!this.isReady()) {
-		this.$broadcastQueue.push(msgObj)
-		return
-	}
+	if (!this.isReady() || this.$broadcastQueue.length > 0) {
+		if (msgObj.meta.type === MESSAGE_TYPE.APAT) {
+			this.$broadcastQueue.unshift(msgObj)
+		} else {
+			this.$broadcastQueue.push(msgObj)
+		}
 
-	if (this.$broadcastQueue.length > 0) {
-		this.$broadcastQueue.push(msgObj)
+		if (!this.isReady()) return
 		msgObj = this.$broadcastQueue.shift()
 	}
 
-	if (this.$server != null) $serverFn.broadcast.call(this, msgObj)
+	if (this.$server != null) $serverFn.broadcast.call(this, msgObj, this.$server.clients)
 	$clientFn.notify.call(this, msgObj)
 
 	process.nextTick(() => {
@@ -145,15 +152,40 @@ Pylon.prototype.register = function (pattern, action /*(data, respond)*/) {
 		pattern: pattern,
 		action: action
 	})
+
+	if (this.isReady() && (this.$server != null
+		&& this.$server.clients.length > 0 || this.$clients.length > 0)) {
+
+		this.$notify({
+			meta : {
+				id: shortId.generate(),
+				type: MESSAGE_TYPE.APAT
+			},
+			body : {
+				pattern: pattern
+			}
+		})
+	}
+
 	return this
 }
 
+Pylon.prototype.terminate = function () {
+	this.$clients.forEach((client) => {
+		client.socket.destroy()
+	})
+	this.$server.clients.forEach((client) => {
+		client.socket.destroy()
+	})
+	this.$server.server.close()
+}
 // todo: move to helpers
 Pylon.prototype.parse = function (message) {
 	return JSON.parse(message)
 }
 
 // todo: move to helpers
+Pylon.prototype.$ready = true
 Pylon.prototype.isReady = function () {
 	let ready = true
 
@@ -171,6 +203,20 @@ Pylon.prototype.isReady = function () {
 }
 
 // --------------------------------------------
+// internal helpers methods
+// --------------------------------------------
+
+Pylon.prototype.$helperFn.updatePattern = function (client, pattern) {
+	let patterns = (pattern instanceof Array)  ? pattern : [pattern]
+
+	patterns.forEach((pattern) => {
+		if (client.patterns.indexOf(pattern) == -1) {
+			client.patterns.push(pattern)
+		}
+	})
+}
+
+// --------------------------------------------
 // internal server methods
 // --------------------------------------------
 
@@ -185,7 +231,8 @@ Pylon.prototype.$serverFn.onClientConnect = function (sock) {
 	let $server = this.$server
 	let client = {
 		socket: sock,
-		id: shortId.generate()
+		id: shortId.generate(),
+		patterns: []
 	}
 
 	$serverFn.log.call(this, LOG_TYPE.CON + ' client connected'
@@ -230,16 +277,32 @@ Pylon.prototype.$serverFn.processMessage = function (client, message) {
 	switch(msgObj.meta.type) {
 		case MESSAGE_TYPE.INTR:
 			client.name = msgObj.body.name
-			$clientFn.activate.call(this, client);
-			break;
+			$clientFn.activate.call(this, client)
+
+			if (this.$actions.length > 0) {
+				$serverFn.broadcast.call(this, {
+					meta : {
+						id: shortId.generate(),
+						type: MESSAGE_TYPE.APAT
+					},
+					body : {
+						pattern: this.$actions.map((action) => { return action.pattern })
+					}
+				}, client)
+			}
+			break
+
+		case MESSAGE_TYPE.APAT:
+			$helperFn.updatePattern.call(this, client, msgObj.body.pattern)
+			break
 
 		case MESSAGE_TYPE.MSSG:
 			this.$notify.call(this, msgObj)
-			break;
+			break
 
 		case MESSAGE_TYPE.REPL:
 			this.$notify.call(this, msgObj)
-			break;
+			break
 	}
 }
 
@@ -252,13 +315,14 @@ Pylon.prototype.$serverFn.onClose = function (client, data) {
 	})
 }
 
-Pylon.prototype.$serverFn.broadcast = function (msgObj) {
+Pylon.prototype.$serverFn.broadcast = function (msgObj, clients) {
 	let srvId = this.$server.id
 
-	msgObj.meta.type = msgObj.meta.type === MESSAGE_TYPE.REPL ? msgObj.meta.type : MESSAGE_TYPE.MSSG
+	msgObj.meta.type = msgObj.meta.type || MESSAGE_TYPE.MSSG
 	msgObj.meta.srvId = srvId
 
-	this.$server.clients.forEach((client) => {
+	let targetClients = (clients instanceof Array) ? clients : [clients]
+	targetClients.forEach((client) => {
 		$serverFn.log.call(this, LOG_TYPE.BRD + ' ' + JSON.stringify(msgObj) + ' B> ' + client.id)
 		$sockFn.write.call(this, client.socket, msgObj)
 	})
@@ -316,7 +380,11 @@ Pylon.prototype.$clientFn.processMessage = function (client, message) {
 					clientId: client.id
 				}
 			})
-			break;
+			break
+
+		case MESSAGE_TYPE.APAT:
+			$helperFn.updatePattern.call(this, client, msgObj.body.pattern)
+			break
 
 		case MESSAGE_TYPE.MSSG:
 			this.$actions.forEach((actionObj) => {
@@ -336,18 +404,55 @@ Pylon.prototype.$clientFn.processMessage = function (client, message) {
 			break;
 
 		case MESSAGE_TYPE.REPL:
-			this.$callbacks = this.$callbacks.filter((cbObj) => {
+
+			let count = this.$callbacks.length
+			let allCbs = this.$callbacks
+			let checkedCbs = []
+			let msgId = msgObj.meta.msgId
+			let msgPatt = msgObj.meta.patt
+			let founded = false
+
+			while(count > 0 && !founded) {
+				let cbObj = allCbs.pop()
+
+				if (cbObj.msgId == msgId && cbObj.pattern == msgPatt) {
+					founded = true
+					cbObj.callback(msgObj.body)
+					this.$callbacks = Array.prototype.push.apply(allCbs, checkedCbs);
+					return
+				}
+				checkedCbs.push(cbObj)
+				count --
+			}
+
+
+			return
+			this.$callbacks = this.$callbacks.filterX((cbObj) => {
 				// todo: allow regexes
-				if (cbObj.pattern != msgObj.meta.patt || cbObj.msgId != msgObj.meta.id) {
-					return true
+				if (cbObj.msgId == msgObj.meta.id && cbObj.pattern == msgObj.meta.patt) {
+					cbObj.callback(msgObj.body)
+					return false
 				}
 
-				cbObj.callback(msgObj.body)
-				return false
+				return true
 			})
 			break;
 	}
 }
+
+Array.prototype.filterX = function(expression) {
+	var res = [];
+	for(var idx=0; idx<this.length; idx++)
+	{
+		var currentItem = this[idx];
+		if(expression(currentItem))
+		{
+			res.push(currentItem);
+		}
+	}
+	return res;
+};
+
 
 Pylon.prototype.$clientFn.onClose = (client) => {
 	$clientFn.log.call(this, client, 'connection closed')
@@ -356,9 +461,12 @@ Pylon.prototype.$clientFn.onClose = (client) => {
 Pylon.prototype.$clientFn.notify = function (msgObj) {
 	let srvId = this.$server ? this.$server.id : null
 
-	msgObj.meta.type = msgObj.meta.type === MESSAGE_TYPE.REPL ? msgObj.meta.type : MESSAGE_TYPE.MSSG
+	msgObj.meta.type = msgObj.meta.type || MESSAGE_TYPE.MSSG
 	this.$clients.forEach((client) => {
 		if (srvId != null && (client.id == srvId || msgObj.meta.srvId == srvId)) return
+		if (msgObj.meta.patt && client.patterns.indexOf(msgObj.meta.patt) == -1) {
+			return;
+		}
 		msgObj.meta.clientId = client.id
 		$clientFn.log.call(this, client, LOG_TYPE.NOT + ' ' + JSON.stringify(msgObj) + ' N> ' + client.srvId)
 		$sockFn.write.call(this, client.socket, msgObj)

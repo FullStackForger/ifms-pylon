@@ -1,6 +1,6 @@
 var
 	Pylon = new require('..'),
-	pylon = new Pylon()
+	pylon = new Pylon({ debug: true })
 
 pylon
 	.create({ name: 'p#1' })

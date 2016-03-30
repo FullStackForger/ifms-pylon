@@ -1,6 +1,6 @@
 var
 	Pylon = new require('..'),
-	pylon = new Pylon()
+	pylon = new Pylon({ debug: true })
 
 pylon
 	.create({ name: 'p#1' })
@@ -20,4 +20,5 @@ function onInfoRequestAction (data) {
 
 function onInfoDataAction (data) {
 	console.log('data received: ' + JSON.stringify(data))
+	pylon.terminate()
 }
